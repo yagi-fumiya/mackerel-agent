@@ -148,6 +148,7 @@ type PluginConfig struct {
 	ExcludePattern        *string       `toml:"exclude_pattern"`
 	Action                CommandConfig `toml:"action"`
 	Env                   Env           `toml:"env"`
+	Memo                  *string       `toml:"memo"`
 }
 
 // CommandConfig represents an executable command configuration.
@@ -266,6 +267,7 @@ type CheckPlugin struct {
 	MaxCheckAttempts      *int32
 	PreventAlertAutoClose bool
 	Action                *Command
+	Memo                  string
 }
 
 func (pconf *PluginConfig) buildCheckPlugin(name string) (*CheckPlugin, error) {
@@ -294,6 +296,11 @@ func (pconf *PluginConfig) buildCheckPlugin(name string) (*CheckPlugin, error) {
 		}
 	}
 
+	memo := ""
+	if pconf.Memo != nil {
+		memo = *pconf.Memo
+	}
+
 	plugin := CheckPlugin{
 		Command:               *cmd,
 		NotificationInterval:  pconf.NotificationInterval,
@@ -301,6 +308,7 @@ func (pconf *PluginConfig) buildCheckPlugin(name string) (*CheckPlugin, error) {
 		MaxCheckAttempts:      pconf.MaxCheckAttempts,
 		PreventAlertAutoClose: pconf.PreventAlertAutoClose,
 		Action:                action,
+		Memo:                  memo,
 	}
 	if plugin.MaxCheckAttempts != nil && *plugin.MaxCheckAttempts > 1 && plugin.PreventAlertAutoClose {
 		*plugin.MaxCheckAttempts = 1
