@@ -62,6 +62,93 @@ func TestEC2Generate(t *testing.T) {
 	}
 }
 
+func TestEC2Generate_TokenEndpointNotFound(t *testing.T) {
+	handler := func(res http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/latest/metadata/instance-id" {
+			fmt.Fprint(res, "i-4f90d537")
+			return
+		}
+		http.Error(res, "not found", http.StatusNotFound)
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		handler(res, req)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	g := newEC2Generator(u)
+
+	value, err := g.Generate()
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	cloud, typeOk := value.(*mackerel.Cloud)
+	if !typeOk {
+		t.Errorf("value should be *mackerel.Cloud. %+v", value)
+	}
+
+	metadata, typeOk := cloud.MetaData.(map[string]string)
+	if !typeOk {
+		t.Errorf("MetaData should be map. %+v", cloud.MetaData)
+	}
+
+	if metadata["instance-id"] != "i-4f90d537" {
+		t.Errorf("unexpected instance-id: %s", metadata["instance-id"])
+	}
+}
+
+func TestEC2Generate_Inaccessible(t *testing.T) {
+	unreachableURL, _ := url.Parse("http://unreachable.localhost")
+	g := newEC2Generator(unreachableURL)
+
+	_, err := g.Generate()
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+}
+
+func TestEC2Generate_TokenResponseHeaderCorrupted(t *testing.T) {
+	pathToContent := map[string]string{
+		"/latest/metadata/instance-id": "i-4f90d537",
+	}
+	handler := func(res http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/latest/api/token" {
+			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "wrrrrong")
+			fmt.Fprint(res, "a-dummy-token")
+			return
+		}
+		if content, ok := pathToContent[req.URL.Path]; ok {
+			fmt.Fprint(res, content)
+			return
+		}
+		http.Error(res, "not found", http.StatusNotFound)
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		handler(res, req)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	g := newEC2Generator(u)
+
+	data, err := g.Generate()
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+	if data != nil {
+		t.Errorf("data shuold be empty: %s", data)
+	}
+}
+
 func TestEC2SuggestCustomIdentifier(t *testing.T) {
 	i := 0
 	threshold := 100
