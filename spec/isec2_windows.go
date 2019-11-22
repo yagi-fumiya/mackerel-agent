@@ -74,7 +74,9 @@ func isEC2WithSpecifiedWmiRecords(ctx context.Context, records []Win32ComputerSy
 		}
 		defer resp.Body.Close()
 
-		res = resp.StatusCode == 200
+		// - IMDSv1 should return ok
+		// - IMDSv2 shuold return Unauthorized due to missing token
+		res = resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 		return nil
 	})
 

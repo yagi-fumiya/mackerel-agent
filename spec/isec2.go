@@ -26,7 +26,9 @@ func isEC2(ctx context.Context) bool {
 		}
 		defer resp.Body.Close()
 
-		isEC2 = resp.StatusCode == 200
+		// - IMDSv1 should return ok
+		// - IMDSv2 shuold return Unauthorized due to missing token
+		isEC2 = resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 		return nil
 	})
 	return err == nil && isEC2

@@ -62,7 +62,9 @@ func isEC2WithSpecifiedUUIDFiles(ctx context.Context, uuidFiles []string) bool {
 		}
 		defer resp.Body.Close()
 
-		res = resp.StatusCode == 200
+		// - IMDSv1 should return ok
+		// - IMDSv2 shuold return Unauthorized due to missing token
+		res = resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 		return nil
 	})
 
