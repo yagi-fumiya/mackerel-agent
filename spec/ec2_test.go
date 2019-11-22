@@ -6,7 +6,63 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/mackerelio/mackerel-client-go"
 )
+
+func TestEC2Generate(t *testing.T) {
+	handler := func(res http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/latest/metadata/instance-id" {
+			fmt.Fprint(res, "i-4f90d537")
+			return
+		}
+		if req.URL.Path == "/latest/api/token" {
+			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
+			fmt.Fprint(res, "a-dummy-token")
+			return
+		}
+		http.Error(res, "not found", http.StatusNotFound)
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		handler(res, req)
+	}))
+	defer ts.Close()
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	g := newEC2Generator(u)
+
+	value, err := g.Generate()
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	cloud, typeOk := value.(*mackerel.Cloud)
+	if !typeOk {
+		t.Errorf("value should be *mackerel.Cloud. %+v", value)
+	}
+
+	metadata, typeOk := cloud.MetaData.(map[string]string)
+	if !typeOk {
+		t.Errorf("MetaData should be map. %+v", cloud.MetaData)
+	}
+
+	if len(metadata["instance-id"]) == 0 {
+		t.Error("instance-id should be filled")
+	}
+
+	customIdentifier, err := g.SuggestCustomIdentifier()
+	if err != nil {
+		t.Errorf("should not raise error: %s", err)
+	}
+
+	if len(customIdentifier) == 0 {
+		t.Error("customIdentifier should be retrieved")
+	}
+}
 
 func TestEC2SuggestCustomIdentifier(t *testing.T) {
 	i := 0
