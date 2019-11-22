@@ -55,7 +55,7 @@ func SuggestCloudGenerator(conf *config.Config) *CloudGenerator {
 	case config.CloudPlatformNone:
 		return nil
 	case config.CloudPlatformEC2:
-		return &CloudGenerator{&EC2Generator{ec2BaseURL}}
+		return &CloudGenerator{newEC2Generator(ec2BaseURL)}
 	case config.CloudPlatformGCE:
 		return &CloudGenerator{&GCEGenerator{gceMetaURL}}
 	case config.CloudPlatformAzureVM:
@@ -71,7 +71,7 @@ func SuggestCloudGenerator(conf *config.Config) *CloudGenerator {
 	wg.Add(3)
 	go func() {
 		if isEC2(ctx) {
-			gCh <- &CloudGenerator{&EC2Generator{ec2BaseURL}}
+			gCh <- &CloudGenerator{newEC2Generator(ec2BaseURL)}
 			cancel()
 		}
 		wg.Done()
@@ -163,13 +163,20 @@ func requestGCEMeta(ctx context.Context) ([]byte, error) {
 
 // EC2Generator meta generator for EC2
 type EC2Generator struct {
-	baseURL *url.URL
+	metadataClient *EC2MetadataClient
+}
+
+func newEC2Generator(baseURL *url.URL) *EC2Generator {
+	return &EC2Generator{
+		metadataClient: &EC2MetadataClient{
+			client:  httpCli(),
+			baseURL: baseURL,
+		},
+	}
 }
 
 // Generate collects metadata from cloud platform.
 func (g *EC2Generator) Generate() (interface{}, error) {
-	cl := httpCli()
-
 	metadataKeys := []string{
 		"instance-id",
 		"instance-type",
@@ -187,7 +194,7 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 	metadata := make(map[string]string)
 
 	for _, key := range metadataKeys {
-		resp, err := cl.Get(g.baseURL.String() + "/latest/metadata/" + key)
+		resp, err := g.metadataClient.Get(context.TODO(), "/latest/metadata/"+key)
 		if err != nil {
 			cloudLogger.Debugf("This host may not be running on EC2. Error while reading '%s'", key)
 			return nil, nil
@@ -213,9 +220,8 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 func (g *EC2Generator) SuggestCustomIdentifier() (string, error) {
 	identifier := ""
 	err := retry.Retry(3, 2*time.Second, func() error {
-		cl := httpCli()
 		key := "instance-id"
-		resp, err := cl.Get(g.baseURL.String() + "/latest/metadata/" + key)
+		resp, err := g.metadataClient.Get(context.TODO(), "/latest/metadata/"+key)
 		if err != nil {
 			return fmt.Errorf("error while retrieving instance-id")
 		}
