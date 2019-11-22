@@ -42,7 +42,7 @@ func TestIsEC2UUID(t *testing.T) {
 func TestIsEC2(t *testing.T) {
 	tests := []struct {
 		existsUUIDFiles [2]bool // [0]: as `/sys/hypervisor/uuid`, [1]: as `/sys/devices/virtual/dmi/id/product_uuid`
-		existsAMIId     bool
+		statusCode      number
 		expect          bool
 	}{
 		{
@@ -50,49 +50,55 @@ func TestIsEC2(t *testing.T) {
 				true,
 				true,
 			},
-			existsAMIId: true,
-			expect:      true,
+			statusCode: 200,
+			expect:     true,
 		},
 		{
 			existsUUIDFiles: [2]bool{
 				false,
 				true,
 			},
-			existsAMIId: true,
-			expect:      true,
+			statusCode: 200,
+			expect:     true,
 		},
 		{
 			existsUUIDFiles: [2]bool{
 				true,
 				false,
 			},
-			existsAMIId: true,
-			expect:      true,
+			statusCode: 200,
+			expect:     true,
 		},
 		{
 			existsUUIDFiles: [2]bool{
 				false,
 				false,
 			},
-			existsAMIId: true,
-			expect:      false,
+			statusCode: 200,
+			expect:     false,
 		},
 		{
 			existsUUIDFiles: [2]bool{
 				true,
 				true,
 			},
-			existsAMIId: false,
-			expect:      false,
+			statusCode: 404,
+			expect:     false,
+		},
+		{
+			existsUUIDFiles: [2]bool{
+				true,
+				true,
+			},
+			statusCode: 401,
+			expect:     true,
 		},
 	}
 
 	for _, tc := range tests {
 		func() {
 			handler := func(res http.ResponseWriter, req *http.Request) {
-				if !tc.existsAMIId {
-					res.WriteHeader(http.StatusNotFound)
-				}
+				res.WriteHeader(tc.statusCode)
 			}
 			ts := httptest.NewServer(http.HandlerFunc(handler))
 			defer func() { ts.Close() }()
