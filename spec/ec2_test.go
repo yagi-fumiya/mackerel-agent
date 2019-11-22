@@ -53,15 +53,6 @@ func TestEC2Generate(t *testing.T) {
 	if len(metadata["instance-id"]) == 0 {
 		t.Error("instance-id should be filled")
 	}
-
-	customIdentifier, err := g.SuggestCustomIdentifier()
-	if err != nil {
-		t.Errorf("should not raise error: %s", err)
-	}
-
-	if len(customIdentifier) == 0 {
-		t.Error("customIdentifier should be retrieved")
-	}
 }
 
 func TestEC2SuggestCustomIdentifier(t *testing.T) {
