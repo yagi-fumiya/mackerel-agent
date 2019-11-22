@@ -15,29 +15,22 @@ import (
 	"github.com/mackerelio/mackerel-agent/config"
 )
 
-func TestCloudGenerate(t *testing.T) {
-	handler := func(res http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/latest/metadata/instance-id" {
-			fmt.Fprint(res, "i-4f90d537")
-			return
-		}
-		if req.URL.Path == "/latest/api/token" {
-			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
-			fmt.Fprint(res, "a-dummy-token")
-			return
-		}
-		http.Error(res, "not found", http.StatusNotFound)
-	}
-	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		handler(res, req)
-	}))
-	defer ts.Close()
+type mockCloudMetaGenerator struct{}
 
-	u, err := url.Parse(ts.URL)
-	if err != nil {
-		t.Errorf("should not raise error: %s", err)
+func (g *mockCloudMetaGenerator) Generate() (interface{}, error) {
+	metadata := map[string]string{
+		"dummyKey": "dummyValue",
 	}
-	g := &CloudGenerator{newEC2Generator(u)}
+	return &mackerel.Cloud{Provider: "dummy", MetaData: metadata}, nil
+}
+
+func (g *mockCloudMetaGenerator) SuggestCustomIdentifier() (string, error) {
+	return "dummy.mackerel.io.", nil
+}
+
+// tests whether CloudGenerator properly delegates to embedded CloudMetaGenerator
+func TestCloudGenerate(t *testing.T) {
+	g := &CloudGenerator{&mockCloudMetaGenerator{}}
 
 	value, err := g.Generate()
 	if err != nil {
@@ -49,13 +42,17 @@ func TestCloudGenerate(t *testing.T) {
 		t.Errorf("value should be *mackerel.Cloud. %+v", value)
 	}
 
+	if cloud.Provider != "dummy" {
+		t.Errorf("unexpected provider: %s", cloud.Provider)
+	}
+
 	metadata, typeOk := cloud.MetaData.(map[string]string)
 	if !typeOk {
 		t.Errorf("MetaData should be map. %+v", cloud.MetaData)
 	}
 
-	if len(metadata["instance-id"]) == 0 {
-		t.Error("instance-id should be filled")
+	if metadata["dummyKey"] != "dummyValue" {
+		t.Errorf("unexpected metadata: %+v", metadata)
 	}
 
 	customIdentifier, err := g.SuggestCustomIdentifier()
