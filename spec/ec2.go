@@ -184,14 +184,14 @@ func (c *EC2MetadataClient) fetchAndStoreToken(ctx context.Context) error {
 	requestedAt := time.Now()
 	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
-		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token: '%s'", err)
+		c.logger.Debugf("(Ignored) Failed to request EC2 Metadata Token: '%s'", err)
 		c.tokenCache = &ec2MetadataEndpointTokenCache{}
 		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token request: '%s'", err)
+		c.logger.Debugf("(Ignored) Failed to request EC2 Metadata Token request: '%s'", err)
 		c.tokenCache = &ec2MetadataEndpointTokenCache{}
 		return nil
 	}
