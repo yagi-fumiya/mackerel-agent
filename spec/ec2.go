@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Songmu/retry"
+	"github.com/mackerelio/golib/logging"
 	"github.com/mackerelio/mackerel-client-go"
 )
 
@@ -22,11 +23,13 @@ func init() {
 // EC2Generator meta generator for EC2
 type EC2Generator struct {
 	metadataClient *EC2MetadataClient
+	logger         *logging.Logger
 }
 
 func newEC2Generator(baseURL *url.URL) *EC2Generator {
 	return &EC2Generator{
-		metadataClient: newEC2MetadataClient(baseURL),
+		logger:         cloudLogger,
+		metadataClient: newEC2MetadataClient(baseURL, cloudLogger),
 	}
 }
 
@@ -51,7 +54,7 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 	for _, key := range metadataKeys {
 		resp, err := g.metadataClient.Get(context.TODO(), "/latest/metadata/"+key)
 		if err != nil {
-			cloudLogger.Debugf("This host may not be running on EC2. Error while reading '%s'", key)
+			g.logger.Debugf("This host may not be running on EC2. Error while reading '%s'", key)
 			return nil, nil
 		}
 		defer resp.Body.Close()
@@ -62,9 +65,9 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 				break
 			}
 			metadata[key] = string(body)
-			cloudLogger.Debugf("results %s:%s", key, string(body))
+			g.logger.Debugf("results %s:%s", key, string(body))
 		} else {
-			cloudLogger.Debugf("Status code of the result of requesting metadata '%s' is '%d'", key, resp.StatusCode)
+			g.logger.Debugf("Status code of the result of requesting metadata '%s' is '%d'", key, resp.StatusCode)
 		}
 	}
 
@@ -105,12 +108,14 @@ type EC2MetadataClient struct {
 	baseURL              *url.URL
 	cachedToken          string
 	cachedTokenExpiredAt *time.Time
+	logger               *logging.Logger
 }
 
-func newEC2MetadataClient(baseURL *url.URL) *EC2MetadataClient {
+func newEC2MetadataClient(baseURL *url.URL, logger *logging.Logger) *EC2MetadataClient {
 	client := &EC2MetadataClient{
 		client:  httpCli(),
 		baseURL: baseURL,
+		logger:  logger,
 	}
 	client.getToken(context.TODO())
 
@@ -141,7 +146,7 @@ func (c *EC2MetadataClient) getInternal(ctx context.Context, path string) (*http
 	req, err := http.NewRequest("GET", c.baseURL.String()+path, nil)
 	req.Header.Set("X-aws-ec2-metadata-token", token)
 	if err != nil {
-		cloudLogger.Errorf("Failed to build EC2 Metadata request: '%s'", err)
+		c.logger.Errorf("Failed to build EC2 Metadata request: '%s'", err)
 		return nil, err
 	}
 	return c.client.Do(req.WithContext((ctx)))
@@ -173,7 +178,7 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	// So we ignore HTTP request failures here
 	req, err := http.NewRequest("PUT", c.baseURL.String()+"/latest/api/token", nil)
 	if err != nil {
-		cloudLogger.Errorf("Failed to build EC2 Metadata Token request: '%s'", err)
+		c.logger.Errorf("Failed to build EC2 Metadata Token request: '%s'", err)
 		return "", nil, err
 	}
 	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "60")
@@ -181,24 +186,24 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	requestedAt := time.Now()
 	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
-		cloudLogger.Infof("Failed to request EC2 Metadata Token: '%s'", err)
+		c.logger.Infof("Failed to request EC2 Metadata Token: '%s'", err)
 		return "", nil, nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		cloudLogger.Infof("Failed to request EC2 Metadata Token request: '%s'", err)
+		c.logger.Infof("Failed to request EC2 Metadata Token request: '%s'", err)
 		return "", nil, nil
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		cloudLogger.Errorf("Failed to read response of EC2 Metadata Token request: '%s'", err)
+		c.logger.Errorf("Failed to read response of EC2 Metadata Token request: '%s'", err)
 		return "", nil, err
 	}
 
 	ttlSeconds, err := strconv.Atoi(resp.Header.Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds"))
 	if err != nil {
-		cloudLogger.Errorf("Failed to parse ttl response header of EC2 Metadata Token request: '%s'", err)
+		c.logger.Errorf("Failed to parse ttl response header of EC2 Metadata Token request: '%s'", err)
 		return "", nil, err
 	}
 	// Note that this expiredAt MAY not be accurate, but at least it should be earlier the accurate one.
