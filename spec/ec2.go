@@ -101,25 +101,33 @@ func (g *EC2Generator) SuggestCustomIdentifier() (string, error) {
 	return identifier, err
 }
 
+type ec2MetadataEndpointTokenCache struct {
+	token     string
+	expiredAt *time.Time
+}
+
+func (c *ec2MetadataEndpointTokenCache) expired(now time.Time) bool {
+	if c.expiredAt == nil {
+		return false
+	}
+	return now.After(*c.expiredAt)
+}
+
 // EC2MetadataClient handles HTTP request to EC2 Instance Metadata Service v2
 // https://aws.amazon.com/blogs/security/defense-in-depth-open-firewalls-reverse-proxies-ssrf-vulnerabilities-ec2-instance-metadata-service/
 type EC2MetadataClient struct {
-	client               *http.Client
-	baseURL              *url.URL
-	cachedToken          string
-	cachedTokenExpiredAt *time.Time
-	logger               *logging.Logger
+	client     *http.Client
+	baseURL    *url.URL
+	tokenCache *ec2MetadataEndpointTokenCache
+	logger     *logging.Logger
 }
 
 func newEC2MetadataClient(baseURL *url.URL, logger *logging.Logger) *EC2MetadataClient {
-	client := &EC2MetadataClient{
+	return &EC2MetadataClient{
 		client:  httpCli(),
 		baseURL: baseURL,
 		logger:  logger,
 	}
-	_ = client.refreshToken(context.TODO())
-
-	return client
 }
 
 // Get requests to the specified path with following procedure:
@@ -129,9 +137,9 @@ func newEC2MetadataClient(baseURL *url.URL, logger *logging.Logger) *EC2Metadata
 func (c *EC2MetadataClient) Get(ctx context.Context, path string) (*http.Response, error) {
 	resp, err := c.getInternal(ctx, path)
 
-	// 401 suggests token's expiration, so in this case refresh and retry once
+	// 401 suggests token's expiration
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
-		c.refreshToken(ctx)
+		c.fetchAndStoreToken(ctx)
 		return c.getInternal(ctx, path)
 	}
 	return resp, err
@@ -153,33 +161,23 @@ func (c *EC2MetadataClient) getInternal(ctx context.Context, path string) (*http
 }
 
 func (c *EC2MetadataClient) getToken(ctx context.Context) (string, error) {
-	// If the cached token has expired, refresh
-	if c.cachedTokenExpiredAt != nil && time.Now().After(*c.cachedTokenExpiredAt) {
-		if err := c.refreshToken(ctx); err != nil {
+	// If the cached token does not exist or expired, refresh it
+	if c.tokenCache == nil || c.tokenCache.expired(time.Now()) {
+		if err := c.fetchAndStoreToken(ctx); err != nil {
 			return "", err
 		}
 	}
-	return c.cachedToken, nil
+	return c.tokenCache.token, nil
 }
 
-func (c *EC2MetadataClient) refreshToken(ctx context.Context) error {
-	token, expiredAt, err := c.getTokenInternal(ctx)
-	if err != nil {
-		return err
-	}
-	c.cachedToken = token
-	c.cachedTokenExpiredAt = expiredAt
-
-	return nil
-}
-
-func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time.Time, error) {
+func (c *EC2MetadataClient) fetchAndStoreToken(ctx context.Context) error {
+	c.tokenCache = nil
 	// There might be some EC2-compatible environments which does NOT support IMDSv2,
-	// So we ignore HTTP request failures here
+	// So we ignore HTTP request failures here and store empty (but not nil) token as cache
 	req, err := http.NewRequest("PUT", c.baseURL.String()+"/latest/api/token", nil)
 	if err != nil {
 		c.logger.Errorf("Failed to build EC2 Metadata Token request: '%s'", err)
-		return "", nil, err
+		return err
 	}
 	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "60")
 
@@ -187,27 +185,33 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
 		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token: '%s'", err)
-		return "", nil, nil
+		c.tokenCache = &ec2MetadataEndpointTokenCache{}
+		return nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token request: '%s'", err)
-		return "", nil, nil
+		c.tokenCache = &ec2MetadataEndpointTokenCache{}
+		return nil
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		c.logger.Errorf("Failed to read response of EC2 Metadata Token request: '%s'", err)
-		return "", nil, err
+		return err
 	}
 
 	ttlSeconds, err := strconv.Atoi(resp.Header.Get("X-Aws-Ec2-Metadata-Token-Ttl-Seconds"))
 	if err != nil {
 		c.logger.Errorf("Failed to parse ttl response header of EC2 Metadata Token request: '%s'", err)
-		return "", nil, err
+		return err
 	}
 	// Note that this expiredAt MAY not be accurate, but at least it should be earlier the accurate one.
 	expiredAt := requestedAt.Add(time.Second * time.Duration(ttlSeconds))
 
-	return string(body), &expiredAt, nil
+	c.tokenCache = &ec2MetadataEndpointTokenCache{
+		token:     string(body),
+		expiredAt: &expiredAt,
+	}
+	return nil
 }
