@@ -16,7 +16,7 @@ func isEC2(ctx context.Context) bool {
 	err := retry.WithContext(ctx, 2, 2*time.Second, func() error {
 		cl := httpCli()
 		// '/ami-id` is probably an AWS specific URL
-		req, err := http.NewRequest("GET", ec2BaseURL.String()+"/ami-id", nil)
+		req, err := http.NewRequest("GET", ec2BaseURL.String()+"/latest/metadata/ami-id", nil)
 		if err != nil {
 			return err
 		}

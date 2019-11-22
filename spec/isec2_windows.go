@@ -64,7 +64,7 @@ func isEC2WithSpecifiedWmiRecords(ctx context.Context, records []Win32ComputerSy
 	cl := httpCli()
 	err := retry.WithContext(ctx, 3, 2*time.Second, func() error {
 		// '/ami-id` is probably an AWS specific URL
-		req, err := http.NewRequest("GET", ec2BaseURL.String()+"/ami-id", nil)
+		req, err := http.NewRequest("GET", ec2BaseURL.String()+"/latest/metadata/ami-id", nil)
 		if err != nil {
 			return nil // something wrong. give up
 		}

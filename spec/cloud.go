@@ -40,7 +40,7 @@ var cloudLogger = logging.GetLogger("spec.cloud")
 var ec2BaseURL, gceMetaURL, azureVMBaseURL *url.URL
 
 func init() {
-	ec2BaseURL, _ = url.Parse("http://169.254.169.254/latest/meta-data")
+	ec2BaseURL, _ = url.Parse("http://169.254.169.254")
 	gceMetaURL, _ = url.Parse("http://metadata.google.internal./computeMetadata/v1/?recursive=true")
 	azureVMBaseURL, _ = url.Parse("http://169.254.169.254/metadata/instance")
 }
@@ -186,7 +186,7 @@ func (g *EC2Generator) Generate() (interface{}, error) {
 	metadata := make(map[string]string)
 
 	for _, key := range metadataKeys {
-		resp, err := cl.Get(g.baseURL.String() + "/" + key)
+		resp, err := cl.Get(g.baseURL.String() + "/latest/metadata/" + key)
 		if err != nil {
 			cloudLogger.Debugf("This host may not be running on EC2. Error while reading '%s'", key)
 			return nil, nil
@@ -214,7 +214,7 @@ func (g *EC2Generator) SuggestCustomIdentifier() (string, error) {
 	err := retry.Retry(3, 2*time.Second, func() error {
 		cl := httpCli()
 		key := "instance-id"
-		resp, err := cl.Get(g.baseURL.String() + "/" + key)
+		resp, err := cl.Get(g.baseURL.String() + "/latest/metadata/" + key)
 		if err != nil {
 			return fmt.Errorf("error while retrieving instance-id")
 		}
