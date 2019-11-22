@@ -117,7 +117,7 @@ func newEC2MetadataClient(baseURL *url.URL, logger *logging.Logger) *EC2Metadata
 		baseURL: baseURL,
 		logger:  logger,
 	}
-	client.getToken(context.TODO())
+	_ = client.refreshToken(context.TODO())
 
 	return client
 }
