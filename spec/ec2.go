@@ -186,13 +186,13 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	requestedAt := time.Now()
 	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
-		c.logger.Infof("Failed to request EC2 Metadata Token: '%s'", err)
+		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token: '%s'", err)
 		return "", nil, nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		c.logger.Infof("Failed to request EC2 Metadata Token request: '%s'", err)
+		c.logger.Infof("(Ignored) Failed to request EC2 Metadata Token request: '%s'", err)
 		return "", nil, nil
 	}
 	body, err := ioutil.ReadAll(resp.Body)
