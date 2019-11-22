@@ -10,22 +10,29 @@ import (
 	"github.com/mackerelio/mackerel-client-go"
 )
 
-func TestEC2Generate(t *testing.T) {
+func NewValidMockMetadataServer() *httptest.Server {
+	pathToContent := map[string]string{
+		"/latest/metadata/instance-id": "i-4f90d537",
+	}
 	handler := func(res http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/latest/metadata/instance-id" {
-			fmt.Fprint(res, "i-4f90d537")
-			return
-		}
 		if req.URL.Path == "/latest/api/token" {
 			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
 			fmt.Fprint(res, "a-dummy-token")
 			return
 		}
+		if content, ok := pathToContent[req.URL.Path]; ok {
+			fmt.Fprint(res, content)
+			return
+		}
 		http.Error(res, "not found", http.StatusNotFound)
 	}
-	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		handler(res, req)
 	}))
+}
+
+func TestEC2Generate(t *testing.T) {
+	ts := NewValidMockMetadataServer()
 	defer ts.Close()
 
 	u, err := url.Parse(ts.URL)
