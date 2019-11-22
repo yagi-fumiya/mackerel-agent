@@ -168,10 +168,7 @@ type EC2Generator struct {
 
 func newEC2Generator(baseURL *url.URL) *EC2Generator {
 	return &EC2Generator{
-		metadataClient: &EC2MetadataClient{
-			client:  httpCli(),
-			baseURL: baseURL,
-		},
+		metadataClient: newEC2MetadataClient(baseURL),
 	}
 }
 
@@ -252,23 +249,34 @@ type EC2MetadataClient struct {
 	cachedTokenExpiredAt *time.Time
 }
 
+func newEC2MetadataClient(baseURL *url.URL) *EC2MetadataClient {
+	client := &EC2MetadataClient{
+		client:  httpCli(),
+		baseURL: baseURL,
+	}
+	client.getToken(context.TODO())
+
+	return client
+}
+
 // Get requests to the specified path with following procedure:
 // - If IMDSv2 token is not obtained yet or expired, obtain one (and store to cache)
 // - Do the requested HTTP request with token
 // - If the request failed with Unauthenticaed error, refresh the token and retry once
 func (c *EC2MetadataClient) Get(ctx context.Context, path string) (*http.Response, error) {
-	resp, err := c.getInternal(ctx, path, false)
+	resp, err := c.getInternal(ctx, path)
 
-	// 401 will be returned when the token has expired, so in the case retry once
+	// 401 suggests token's expiration, so in this case refresh and retry once
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
-		return c.getInternal(ctx, path, true)
+		c.refreshToken(ctx)
+		return c.getInternal(ctx, path)
 	}
 	return resp, err
 }
 
-func (c *EC2MetadataClient) getInternal(ctx context.Context, path string, forceRefresh bool) (*http.Response, error) {
+func (c *EC2MetadataClient) getInternal(ctx context.Context, path string) (*http.Response, error) {
 	// obtain token
-	token, err := c.getToken(ctx, forceRefresh)
+	token, err := c.getToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -281,22 +289,30 @@ func (c *EC2MetadataClient) getInternal(ctx context.Context, path string, forceR
 	return c.client.Do(req.WithContext((ctx)))
 }
 
-func (c *EC2MetadataClient) getToken(ctx context.Context, forceRefresh bool) (string, error) {
-	// If forceRefresh is not specified and the cached token *seems* still usable, return the cached one
-	if !forceRefresh && c.cachedToken != "" && c.cachedTokenExpiredAt != nil && c.cachedTokenExpiredAt.After(time.Now()) {
-		return c.cachedToken, nil
+func (c *EC2MetadataClient) getToken(ctx context.Context) (string, error) {
+	// If the cached token has expired, refresh
+	if c.cachedTokenExpiredAt != nil && time.Now().After(*c.cachedTokenExpiredAt) {
+		if err := c.refreshToken(ctx); err != nil {
+			return "", err
+		}
 	}
+	return c.cachedToken, nil
+}
+
+func (c *EC2MetadataClient) refreshToken(ctx context.Context) error {
 	token, expiredAt, err := c.getTokenInternal(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	c.cachedToken = token
 	c.cachedTokenExpiredAt = expiredAt
 
-	return token, nil
+	return nil
 }
 
 func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time.Time, error) {
+	// There might be some EC2-compatible environments which does NOT support IMDSv2,
+	// So we ignore HTTP request failures here
 	req, err := http.NewRequest("PUT", c.baseURL.String()+"/latest/api/token", nil)
 	if err != nil {
 		cloudLogger.Errorf("Failed to build EC2 Metadata Token request: '%s'", err)
@@ -307,13 +323,14 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	requestedAt := time.Now()
 	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
-		cloudLogger.Errorf("Failed to request EC2 Metadata Token: '%s'", err)
-		return "", nil, err
+		cloudLogger.Infof("Failed to request EC2 Metadata Token: '%s'", err)
+		return "", nil, nil
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != 200 {
-		cloudLogger.Errorf("Failed to request EC2 Metadata Token request: '%s'", err)
-		return "", nil, err
+		cloudLogger.Infof("Failed to request EC2 Metadata Token request: '%s'", err)
+		return "", nil, nil
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
