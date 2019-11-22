@@ -241,7 +241,7 @@ func (g *EC2Generator) SuggestCustomIdentifier() (string, error) {
 }
 
 // EC2MetadataClient handles HTTP request to EC2 Instance Metadata Service v2
-// https://aws.amazon.com/jp/blogs/security/defense-in-depth-open-firewalls-reverse-proxies-ssrf-vulnerabilities-ec2-instance-metadata-service/
+// https://aws.amazon.com/blogs/security/defense-in-depth-open-firewalls-reverse-proxies-ssrf-vulnerabilities-ec2-instance-metadata-service/
 type EC2MetadataClient struct {
 	client               *http.Client
 	baseURL              *url.URL
