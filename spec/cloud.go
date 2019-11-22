@@ -272,13 +272,13 @@ func (c *EC2MetadataClient) getInternal(ctx context.Context, path string, forceR
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL.String()+path, nil)
+	req, err := http.NewRequest("GET", c.baseURL.String()+path, nil)
 	req.Header.Set("X-aws-ec2-metadata-token", token)
 	if err != nil {
 		cloudLogger.Errorf("Failed to build EC2 Metadata request: '%s'", err)
 		return nil, err
 	}
-	return c.client.Do(req)
+	return c.client.Do(req.WithContext((ctx)))
 }
 
 func (c *EC2MetadataClient) getToken(ctx context.Context, forceRefresh bool) (string, error) {
@@ -297,7 +297,7 @@ func (c *EC2MetadataClient) getToken(ctx context.Context, forceRefresh bool) (st
 }
 
 func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time.Time, error) {
-	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL.String()+"/latest/api/token", nil)
+	req, err := http.NewRequest("PUT", c.baseURL.String()+"/latest/api/token", nil)
 	if err != nil {
 		cloudLogger.Errorf("Failed to build EC2 Metadata Token request: '%s'", err)
 		return "", nil, err
@@ -305,7 +305,7 @@ func (c *EC2MetadataClient) getTokenInternal(ctx context.Context) (string, *time
 	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "60")
 
 	requestedAt := time.Now()
-	resp, err := c.client.Do(req)
+	resp, err := c.client.Do(req.WithContext((ctx)))
 	if err != nil {
 		cloudLogger.Errorf("Failed to request EC2 Metadata Token: '%s'", err)
 		return "", nil, err
