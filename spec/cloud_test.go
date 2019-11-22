@@ -17,7 +17,16 @@ import (
 
 func TestCloudGenerate(t *testing.T) {
 	handler := func(res http.ResponseWriter, req *http.Request) {
-		fmt.Fprint(res, "i-4f90d537")
+		if req.URL.Path == "/latest/metadata/instance-id" {
+			fmt.Fprint(res, "i-4f90d537")
+			return
+		}
+		if req.URL.Path == "/latest/api/token" {
+			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
+			fmt.Fprint(res, "a-dummy-token")
+			return
+		}
+		http.Error(res, "not found", http.StatusNotFound)
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		handler(res, req)
@@ -63,12 +72,21 @@ func TestEC2SuggestCustomIdentifier(t *testing.T) {
 	i := 0
 	threshold := 100
 	handler := func(res http.ResponseWriter, req *http.Request) {
-		if i < threshold {
-			http.Error(res, "not found", 404)
-		} else {
-			fmt.Fprint(res, "i-4f90d537")
+		if req.URL.Path == "/latest/metadata/instance-id" {
+			if i < threshold {
+				http.Error(res, "not found", http.StatusNotFound)
+			} else {
+				fmt.Fprint(res, "i-4f90d537")
+			}
+			i++
+			return
 		}
-		i++
+		if req.URL.Path == "/latest/api/token" {
+			res.Header().Add("X-aws-Ec2-Metadata-Token-Ttl-Seconds", "60")
+			fmt.Fprint(res, "a-dummy-token")
+			return
+		}
+		http.Error(res, "not found", http.StatusNotFound)
 	}
 	ts := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
 		handler(res, req)
