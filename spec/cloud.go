@@ -260,7 +260,7 @@ func (c *EC2MetadataClient) Get(ctx context.Context, path string) (*http.Respons
 	resp, err := c.getInternal(ctx, path, false)
 
 	// 401 will be returned when the token has expired, so in the case retry once
-	if err != nil && resp.StatusCode == http.StatusUnauthorized {
+	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		return c.getInternal(ctx, path, true)
 	}
 	return resp, err
