@@ -50,6 +50,7 @@ const (
 	CloudPlatformEC2
 	CloudPlatformGCE
 	CloudPlatformAzureVM
+	CloudPlatformOpenStackVM
 )
 
 func (c CloudPlatform) String() string {
@@ -64,6 +65,8 @@ func (c CloudPlatform) String() string {
 		return "gce"
 	case CloudPlatformAzureVM:
 		return "azurevm"
+	case CloudPlatformOpenStackVM:
+		return "openstackvm"
 	}
 	return ""
 }
@@ -85,6 +88,9 @@ func (c *CloudPlatform) UnmarshalText(text []byte) error {
 		return nil
 	case "azurevm":
 		*c = CloudPlatformAzureVM
+		return nil
+	case "openstackvm":
+		*c = CloudPlatformOpenStackVM
 		return nil
 	default:
 		*c = CloudPlatformNone // Avoid panic

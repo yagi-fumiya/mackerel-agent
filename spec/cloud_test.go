@@ -56,6 +56,15 @@ func (g *mockGCECloudMetaGenerator) IsGCE(ctx context.Context) bool {
 	return g.isGCE
 }
 
+type mockOpenStackCloudMetaGenerator struct {
+	mockCloudMetaGenerator
+	isOpenStackVM bool
+}
+
+func (g *mockOpenStackCloudMetaGenerator) IsOpenStackVM(ctx context.Context) bool {
+	return g.isOpenStackVM
+}
+
 func TestCloudGenerator(t *testing.T) {
 	generator := &mockCloudMetaGenerator{
 		metadata: &mackerel.Cloud{
@@ -404,14 +413,20 @@ func (g *slowCloudMetaGenerator) IsGCE(ctx context.Context) bool {
 	return true
 }
 
+func (g *slowCloudMetaGenerator) IsOpenStackVM(ctx context.Context) bool {
+	time.Sleep(2 * time.Second)
+	return true
+}
+
 func TestCloudGeneratorSuggester(t *testing.T) {
 	conf := config.Config{}
 	// none
 	{
 		suggester := &cloudGeneratorSuggester{
-			ec2Generator:     &mockEC2CloudMetaGenerator{isEC2: false},
-			gceGenerator:     &mockGCECloudMetaGenerator{isGCE: false},
-			azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: false},
+			ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: false},
+			gceGenerator:         &mockGCECloudMetaGenerator{isGCE: false},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: false},
+			openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: false},
 		}
 		cGen := suggester.Suggest(&conf)
 		if cGen != nil {
@@ -422,9 +437,10 @@ func TestCloudGeneratorSuggester(t *testing.T) {
 	// EC2
 	{
 		suggester := &cloudGeneratorSuggester{
-			ec2Generator:     &mockEC2CloudMetaGenerator{isEC2: true},
-			gceGenerator:     &mockGCECloudMetaGenerator{isGCE: false},
-			azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: false},
+			ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: true},
+			gceGenerator:         &mockGCECloudMetaGenerator{isGCE: false},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: false},
+			openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: false},
 		}
 		cGen := suggester.Suggest(&conf)
 		if cGen == nil {
@@ -440,9 +456,10 @@ func TestCloudGeneratorSuggester(t *testing.T) {
 	// GCE
 	{
 		suggester := &cloudGeneratorSuggester{
-			ec2Generator:     &mockEC2CloudMetaGenerator{isEC2: false},
-			gceGenerator:     &mockGCECloudMetaGenerator{isGCE: true},
-			azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: false},
+			ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: false},
+			gceGenerator:         &mockGCECloudMetaGenerator{isGCE: true},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: false},
+			openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: false},
 		}
 		cGen := suggester.Suggest(&conf)
 		if cGen == nil {
@@ -458,9 +475,10 @@ func TestCloudGeneratorSuggester(t *testing.T) {
 	// AzureVM
 	{
 		suggester := &cloudGeneratorSuggester{
-			ec2Generator:     &mockEC2CloudMetaGenerator{isEC2: false},
-			gceGenerator:     &mockGCECloudMetaGenerator{isGCE: false},
-			azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: true},
+			ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: false},
+			gceGenerator:         &mockGCECloudMetaGenerator{isGCE: false},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: true},
+			openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: false},
 		}
 		cGen := suggester.Suggest(&conf)
 		if cGen == nil {
@@ -473,12 +491,32 @@ func TestCloudGeneratorSuggester(t *testing.T) {
 		}
 	}
 
+	// OpenStackVM
+	{
+		suggester := &cloudGeneratorSuggester{
+			ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: false},
+			gceGenerator:         &mockGCECloudMetaGenerator{isGCE: false},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: false},
+			openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: true},
+		}
+		cGen := suggester.Suggest(&conf)
+		if cGen == nil {
+			t.Errorf("cGen should not be nil.")
+		}
+
+		_, ok := cGen.CloudMetaGenerator.(openStackVMGenerator)
+		if !ok {
+			t.Errorf("cGen should be openStackVMGenerator")
+		}
+	}
+
 	// multiple generators are available, but suggest the first responded one (in this case Azure)
 	{
 		suggester := &cloudGeneratorSuggester{
-			ec2Generator:     &slowCloudMetaGenerator{},
-			gceGenerator:     &slowCloudMetaGenerator{},
-			azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: true},
+			ec2Generator:         &slowCloudMetaGenerator{},
+			gceGenerator:         &slowCloudMetaGenerator{},
+			azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: true},
+			openStackVMGenerator: &slowCloudMetaGenerator{},
 		}
 		cGen := suggester.Suggest(&conf)
 		if cGen == nil {
@@ -494,9 +532,10 @@ func TestCloudGeneratorSuggester(t *testing.T) {
 
 func TestCloudGeneratorSuggester_CloudPlatformSpecified(t *testing.T) {
 	suggester := &cloudGeneratorSuggester{
-		ec2Generator:     &mockEC2CloudMetaGenerator{isEC2: false},
-		gceGenerator:     &mockGCECloudMetaGenerator{isGCE: false},
-		azureVMGenerator: &mockAzureCloudMetaGenerator{isAzureVM: false},
+		ec2Generator:         &mockEC2CloudMetaGenerator{isEC2: false},
+		gceGenerator:         &mockGCECloudMetaGenerator{isGCE: false},
+		azureVMGenerator:     &mockAzureCloudMetaGenerator{isAzureVM: false},
+		openStackVMGenerator: &mockOpenStackCloudMetaGenerator{isOpenStackVM: false},
 	}
 	{
 		conf := config.Config{
@@ -556,6 +595,22 @@ func TestCloudGeneratorSuggester_CloudPlatformSpecified(t *testing.T) {
 			t.Errorf("cGen should be azureVMGenerator")
 		}
 	}
+
+	{
+		conf := config.Config{
+			CloudPlatform: config.CloudPlatformOpenStackVM,
+		}
+
+		cGen := suggester.Suggest(&conf)
+		if cGen == nil {
+			t.Errorf("cGen should not be nil.")
+		}
+
+		_, ok := cGen.CloudMetaGenerator.(openStackVMGenerator)
+		if !ok {
+			t.Errorf("cGen should be openStackVMGenerator")
+		}
+	}
 }
 
 func TestCloudGeneratorSuggester_Public(t *testing.T) {
@@ -584,6 +639,15 @@ func TestCloudGeneratorSuggester_Public(t *testing.T) {
 		}
 		if gen.baseURL.String() != azureVMBaseURL.String() {
 			t.Error("real baseURL should be embedded to azureVMGenerator ")
+		}
+	}
+	{
+		gen, ok := CloudGeneratorSuggester.openStackVMGenerator.(*OpenStackVMGenerator)
+		if !ok {
+			t.Error("OpenStackVMGenerator should be injected as openStackVMGenerator")
+		}
+		if gen.baseURL.String() != openStackVMBaseURL.String() {
+			t.Error("real baseURL should be embedded to openStackVMGenerator ")
 		}
 	}
 }

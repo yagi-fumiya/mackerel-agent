@@ -24,6 +24,7 @@ import (
 // EC2: http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/AESDG-chapter-instancedata.html
 // GCE: https://developers.google.com/compute/docs/metadata
 // AzureVM: https://docs.microsoft.com/azure/virtual-machines/virtual-machines-instancemetadataservice-overview
+// OpenStack: https://docs.openstack.org/nova/rocky/user/metadata-service.html
 
 // CloudGenerator definition
 type CloudGenerator struct {
@@ -56,14 +57,20 @@ type azureVMGenerator interface {
 	IsAzureVM(ctx context.Context) bool
 }
 
+type openStackVMGenerator interface {
+	CloudMetaGenerator
+	IsOpenStackVM(ctx context.Context) bool
+}
+
 var cloudLogger = logging.GetLogger("spec.cloud")
 
-var ec2BaseURL, gceMetaURL, azureVMBaseURL *url.URL
+var ec2BaseURL, gceMetaURL, azureVMBaseURL, openStackVMBaseURL *url.URL
 
 type cloudGeneratorSuggester struct {
-	ec2Generator     ec2Generator
-	gceGenerator     gceGenerator
-	azureVMGenerator azureVMGenerator
+	ec2Generator         ec2Generator
+	gceGenerator         gceGenerator
+	azureVMGenerator     azureVMGenerator
+	openStackVMGenerator openStackVMGenerator
 }
 
 // Suggest returns suitable CloudGenerator
@@ -78,15 +85,17 @@ func (s *cloudGeneratorSuggester) Suggest(conf *config.Config) *CloudGenerator {
 		return &CloudGenerator{s.gceGenerator}
 	case config.CloudPlatformAzureVM:
 		return &CloudGenerator{s.azureVMGenerator}
+	case config.CloudPlatformOpenStackVM:
+		return &CloudGenerator{s.openStackVMGenerator}
 	}
 
 	var wg sync.WaitGroup
-	gCh := make(chan *CloudGenerator, 3)
+	gCh := make(chan *CloudGenerator, 4)
 
 	// cancelable context
 	ctx, cancel := context.WithCancel(context.Background())
 
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		if s.ec2Generator.IsEC2(ctx) {
 			gCh <- &CloudGenerator{s.ec2Generator}
@@ -108,6 +117,13 @@ func (s *cloudGeneratorSuggester) Suggest(conf *config.Config) *CloudGenerator {
 		}
 		wg.Done()
 	}()
+	go func() {
+		if s.openStackVMGenerator.IsOpenStackVM(ctx) {
+			gCh <- &CloudGenerator{s.openStackVMGenerator}
+			cancel()
+		}
+		wg.Done()
+	}()
 
 	go func() {
 		wg.Wait()
@@ -125,11 +141,13 @@ func init() {
 	ec2BaseURL, _ = url.Parse("http://169.254.169.254/latest")
 	gceMetaURL, _ = url.Parse("http://metadata.google.internal./computeMetadata/v1")
 	azureVMBaseURL, _ = url.Parse("http://169.254.169.254/metadata/instance")
+	openStackVMBaseURL, _ = url.Parse("http://169.254.169.254")
 
 	CloudGeneratorSuggester = &cloudGeneratorSuggester{
-		ec2Generator:     &EC2Generator{baseURL: ec2BaseURL},
-		gceGenerator:     &GCEGenerator{gceMetaURL, gceMeta{}},
-		azureVMGenerator: &AzureVMGenerator{azureVMBaseURL},
+		ec2Generator:         &EC2Generator{baseURL: ec2BaseURL},
+		gceGenerator:         &GCEGenerator{gceMetaURL, gceMeta{}},
+		azureVMGenerator:     &AzureVMGenerator{azureVMBaseURL},
+		openStackVMGenerator: &OpenStackVMGenerator{baseURL: openStackVMBaseURL},
 	}
 }
 
@@ -547,6 +565,112 @@ func (g *AzureVMGenerator) SuggestCustomIdentifier() (string, error) {
 			return fmt.Errorf("invalid instance id")
 		}
 		identifier = instanceID + ".virtual_machine.azure.microsoft.com"
+		return nil
+	})
+	return identifier, err
+}
+
+// OpenStackVMGenerator meta generator for OpenStackVM
+type OpenStackVMGenerator struct {
+	baseURL *url.URL
+}
+
+// IsOpenStackVM checks current environment is OpenStackVM or not
+func (g *OpenStackVMGenerator) IsOpenStackVM(ctx context.Context) bool {
+	isOpenStackVM := false
+	err := retry.WithContext(ctx, 2, 2*time.Second, func() error {
+		cl := httpCli()
+		// '/vmId` is probably OpenStack VM specific URL
+		req, err := http.NewRequest("GET", openStackVMBaseURL.String()+"/openstack/latest/meta_data.json", nil)
+		if err != nil {
+			return err
+		}
+
+		resp, err := cl.Do(req.WithContext(ctx))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		isOpenStackVM = resp.StatusCode == 200
+		return nil
+	})
+	return err == nil && isOpenStackVM
+}
+
+// Generate collects metadata from cloud platform.
+func (g *OpenStackVMGenerator) Generate() (*mackerel.Cloud, error) {
+	cl := httpCli()
+
+	metadataKeys := []string{
+		"instance-id",
+		"instance-type",
+		"placement/availability-zone",
+		"security-groups",
+		"hostname",
+		"local-hostname",
+		"public-hostname",
+		"local-ipv4",
+		"public-ipv4",
+		"reservation-id",
+	}
+
+	metadata := make(map[string]string)
+
+	for _, key := range metadataKeys {
+		req, err := http.NewRequest("GET", g.baseURL.String()+"/latest/meta-data/"+key, nil)
+		if err != nil {
+			cloudLogger.Debugf("Unexpected error while requesting metadata: '%s'", err)
+			return nil, nil
+		}
+		resp, err := cl.Do(req)
+		if err != nil {
+			cloudLogger.Debugf("This host may not be running on OpenStackVM. Error while reading '%s'", key)
+			return nil, nil
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			body, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				cloudLogger.Errorf("Results of requesting metadata cannot be read: '%s'", err)
+				break
+			}
+			metadata[key] = string(body)
+			cloudLogger.Debugf("results %s:%s", key, string(body))
+		} else {
+			cloudLogger.Debugf("Status code of the result of requesting metadata '%s' is '%d'", key, resp.StatusCode)
+		}
+	}
+
+	return &mackerel.Cloud{Provider: "OpenStackVM", MetaData: metadata}, nil
+}
+
+// SuggestCustomIdentifier suggests the identifier of the OpenStackVM
+func (g *OpenStackVMGenerator) SuggestCustomIdentifier() (string, error) {
+	cl := httpCli()
+	identifier := ""
+	err := retry.Retry(3, 2*time.Second, func() error {
+		req, err := http.NewRequest("GET", g.baseURL.String()+"/latest/meta-data.json", nil)
+		if err != nil {
+			return fmt.Errorf("error while retrieving instance-id: %s", err)
+		}
+
+		resp, err := cl.Do(req)
+		if err != nil {
+			return fmt.Errorf("error while retrieving instance-id: %s", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return fmt.Errorf("failed to request instance-id. response code: %d", resp.StatusCode)
+		}
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("results of requesting instance-id cannot be read: '%s'", err)
+		}
+		instanceID := string(body)
+		if instanceID == "" {
+			return fmt.Errorf("invalid instance id")
+		}
+		identifier = instanceID + "virtual_machine.openstack.org"
 		return nil
 	})
 	return identifier, err
