@@ -678,9 +678,15 @@ func (g *OpenStackVMGenerator) SuggestCustomIdentifier() (string, error) {
 		}
 
 		var meta openStackVMMetaData
-		json.Unmarshal(body, &meta)
+		err = json.Unmarshal(body, &meta)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(meta)
 
 		instanceID := meta.Uuid
+		fmt.Println(instanceID)
 		if instanceID == "" {
 			return fmt.Errorf("invalid instance id")
 		}
