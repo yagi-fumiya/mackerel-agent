@@ -572,7 +572,17 @@ func (g *AzureVMGenerator) SuggestCustomIdentifier() (string, error) {
 
 // OpenStackVMGenerator meta generator for OpenStackVM
 type OpenStackVMGenerator struct {
-	baseURL *url.URL
+	baseURL         *url.URL
+	openStackVMMeta openStackVMMetaData
+}
+
+type openStackVMMetaData struct {
+	Uuid        string
+	Zone        string `json:"availability_zone"`
+	Hostname    string
+	LaunchIndex int    `json:"launch_index"`
+	ProjectID   string `json:"project_id"`
+	Name        string
 }
 
 // IsOpenStackVM checks current environment is OpenStackVM or not
@@ -666,7 +676,11 @@ func (g *OpenStackVMGenerator) SuggestCustomIdentifier() (string, error) {
 		if err != nil {
 			return fmt.Errorf("results of requesting instance-id cannot be read: '%s'", err)
 		}
-		instanceID := string(body)
+
+		var meta openStackVMMetaData
+		json.Unmarshal(body, &meta)
+
+		instanceID := meta.Uuid
 		if instanceID == "" {
 			return fmt.Errorf("invalid instance id")
 		}
