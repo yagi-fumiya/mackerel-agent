@@ -649,7 +649,7 @@ func (g *OpenStackVMGenerator) SuggestCustomIdentifier() (string, error) {
 	cl := httpCli()
 	identifier := ""
 	err := retry.Retry(3, 2*time.Second, func() error {
-		req, err := http.NewRequest("GET", g.baseURL.String()+"/latest/meta-data.json", nil)
+		req, err := http.NewRequest("GET", g.baseURL.String()+"/openstack/latest/meta-data.json", nil)
 		if err != nil {
 			return fmt.Errorf("error while retrieving instance-id: %s", err)
 		}
